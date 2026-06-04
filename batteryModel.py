@@ -6,6 +6,7 @@ import socket
 import struct 
 import datetime
 import subprocess
+import json
 
 import numpy as np
 import pandas as pd
@@ -13,13 +14,6 @@ import pandas as pd
 import torch
 import torch.optim as optim
 import torch.nn as nn
-
-
-
-# get battery info 
-# -----------------------
-# pmset -g batt
-# system_profiler SPPowerDataType | grep -A10 "Condition"
 
 
 
@@ -38,73 +32,89 @@ def get_system_info():
     print("\n")
     return system_info
 
+
+
+
 def get_battery_info():
     # get output from command and split it
     # into a list
+    battery = subprocess.getoutput("system_profiler SPPowerDataType")
+    battery_dict = {}
+
+    for index in battery.splitlines():
+        if ":" in index: 
+            key, value = index.split(":", 1)
+            key, value = key.strip(), value.strip()
+            battery_dict[key] = value
+
+
     battery_info = subprocess.getoutput("pmset -g batt")
     batteryInfo_list = battery_info.split()
 
-    battery_percent = batteryInfo_list[7].replace("%;", "")
+    battery_percent =  battery_dict["State of Charge (%)"]
+    charging_state = battery_dict["Charging"]
     time_remaining = batteryInfo_list[9].replace(":", "")
-
-    print(f"Percent Charge: {battery_percent}%")
+    battery_condition = battery_dict["Condition"]
+    maximum_capacity = battery_dict["Maximum Capacity"].replace("%", "")
+    cycle_count = battery_dict["Cycle Count"]
+    low_power_mode = battery_dict["Low Power Mode"]
 
     if time_remaining == "(no":
         print(f"Remaining Battery: Calculating")
         while time_remaining == "(no":
-            if time_remaining !="(no)": break
+            if time_remaining != "(no": 
+                charging_state = batteryInfo_list[8].replace(";", "")
+                break
     
-    print(f"Remaining Battery: {time_remaining}\n")
-    return int(battery_percent), int(time_remaining)
+    print(f"""
+        Percent Charge: {battery_percent}%
+        Charging: {charging_state}
+        Condition: {battery_condition}
+        Maximum Capacity: {maximum_capacity}
+        Cycle Count: {cycle_count}
+        Low Power Mode: {low_power_mode}
+        Remaining Battery: {time_remaining}\n
+    """)
+
+    return {
+        "battery_percent": int(battery_percent),
+        "time_remaining": int(time_remaining),
+        "maximum_capacity": int(maximum_capacity),
+        "cycle_count": int(cycle_count),
+        "charging_state": charging_state,
+        "low_power_mode": low_power_mode,
+        "battery_condition": battery_condition,
+    }
 
 
-def get_battery_health():
-    battery_health = subprocess.getoutput("system_profiler SPPowerDataType | grep -A10 \"Condition\"")
-    batteryHealth_list = battery_health.split()
-
-    battery_condition = batteryHealth_list[1]
-    maximum_capacity = batteryHealth_list[4].replace("%", "")
-
-
-    print(f"Battery Condition: {battery_condition}")
-    print(f"Maximum Capacity: {maximum_capacity}%\n")
-
-    return battery_condition, int(maximum_capacity)
-
+# returns the data from data.csv and adds a new row
+# if the device is on battery power
 def insert_row():
     data_frame = pd.read_csv("data.csv")
 
-    # create a new row when new data is collected
-    new_row = {
-        "Date": system_info['Sys_Date'],
-        "Time": system_info['Sys_Time'],
-        "Battery_Percent": battery_percent,
-        "Time_Remaining": time_remaining,
-        "Battery_Condition": battery_condition,
-        "Maximum_Capacity": maximum_capacity
-    }
+    if battery_data["charging_state"] == "No":
+        # create a new row when new data is collected
+        new_row = {
+            "Date": system_info['Sys_Date'],
+            "Time": system_info['Sys_Time'],
+            "Battery_Percent": battery_data["battery_percent"],
+            "Time_Remaining": battery_data["time_remaining"],
+            "Battery_Condition": battery_data["battery_condition"],
+            "Maximum_Capacity": battery_data["maximum_capacity"]
+        }
+        # adds the new row to the data.csv file
+        data_frame = pd.concat([data_frame, pd.DataFrame([new_row])], ignore_index=True)
+        data_frame.to_csv("data.csv", index=False)
 
-    # adds the new row to the data.csv file
-    data_frame = pd.concat([data_frame, pd.DataFrame([new_row])], ignore_index=True)
-    data_frame.to_csv("data.csv", index=False)
-
-    print(data_frame)
+    # print(data_frame)
     return data_frame
 
 
 
 
 
-
-
-
-
-
 system_info = get_system_info()
-battery_percent, time_remaining = get_battery_info()
-battery_condition, maximum_capacity = get_battery_health()
-
-
+battery_data = get_battery_info()
 
 df = insert_row()
 
@@ -117,13 +127,13 @@ training_data = torch.tensor(
     df[["Battery_Percent", "Maximum_Capacity"]].values,
     dtype=torch.float32
 ).to(device)
-print(f"training data: {training_data.shape}")
 
 target_data = torch.tensor(
     df[["Time_Remaining"]].values,
     dtype=torch.float32
 ).to(device)
 
+print(f"training data: {training_data.shape}")
 print(f"target data: {target_data.shape}")
 
 
@@ -141,6 +151,7 @@ y_val = target_data[split:]
 # training and validation indices
 training_idx = np.arange(0, split)
 validation_idx = np.arange(split, len(df))
+
 
 #debug print
 print(f"""
@@ -172,7 +183,6 @@ optimizer = optim.Adam(
     model.parameters(),
     lr=lr
 )
-
 
 # run the model
 loss_fc = nn.L1Loss()
