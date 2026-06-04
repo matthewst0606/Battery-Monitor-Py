@@ -1,9 +1,8 @@
 import platform
 import psutil
-import socket
-import struct 
 import datetime
 import subprocess
+import sys
 
 import numpy as np
 import pandas as pd
@@ -12,14 +11,12 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 
-# general system info (for testing)
+# a dictionary containing general system info
 # ----------------------------------------------------
 def get_system_info():
     system_info = {}
 
     system_info['Processor_Model'] = platform.machine()
-    system_info['Version'] = platform.mac_ver()
-    system_info['OS'] = platform.system() + platform.version()
     system_info[ 'Sys_Date'] = datetime.datetime.now().strftime('%d/%m/%Y')
     system_info['Sys_Time'] = datetime.datetime.now().strftime("%H:%M:%S")
     system_info['CPU_Usage'] = psutil.cpu_percent()
@@ -29,15 +26,20 @@ def get_system_info():
     system_info['Total_Memory'] = round(memory.total / (1024 ** 3), 2)
     system_info['Used_Memory'] = round(memory.used / (1024 ** 3), 2)
 
-    print(f" {system_info['Sys_Date']}, {system_info['Sys_Time']}")
-    print(f"cpu usage: {system_info['CPU_Usage']}%")
-    print(f"total mem: {system_info['Total_Memory']} GB")
-    print(f"used mem: {system_info['Used_Memory']} GB")
-    print(f"Process_Count: {system_info['Process_Count']}")
-
-
     return system_info
 
+
+def print_system_info():
+    print(f"""
+           Processor: {system_info['Processor_Model']}")
+                Date: {system_info['Sys_Date']}
+                Time: {system_info['Sys_Time']}
+
+           Processes: {system_info['Process_Count']}
+           CPU usage: {system_info['CPU_Usage']}%
+        Total Memory: {system_info['Total_Memory']} GB
+         Used Memory: {system_info['Used_Memory']} GB
+    """)
 
 # gets battery info from the system and add each
 # item to a dictionary
@@ -61,7 +63,6 @@ def get_battery_info():
     cycle_count = battery_dict["Cycle Count"]
     low_power_mode = battery_dict["Low Power Mode"]
 
-
     # another command (previous doesnt have time remaining)
     battery_info = subprocess.getoutput("pmset -g batt")
     batteryInfo_list = battery_info.split()
@@ -76,18 +77,6 @@ def get_battery_info():
             if time_remaining != "(no": 
                 charging_state = batteryInfo_list[8].replace(";", "")
                 break
-    
-
-    #debug print
-    print(f"""
-        Percent Charge: {battery_percent}%
-        Charging: {charging_state}
-        Condition: {battery_condition}
-        Maximum Capacity: {maximum_capacity}
-        Cycle Count: {cycle_count}
-        Low Power Mode: {low_power_mode}
-        Remaining Battery: {time_remaining}\n
-    """)
 
     # return a dictionary
     return {
@@ -99,6 +88,18 @@ def get_battery_info():
         "low_power_mode": low_power_mode,
         "battery_condition": battery_condition,
     }
+
+
+def print_battery_info():
+    print(f"""
+           Percent Charge: {battery_data['battery_percent']}%
+                 Charging: {battery_data['charging_state']}
+                Condition: {battery_data['battery_condition']}
+         Maximum Capacity: {battery_data['maximum_capacity']}
+              Cycle Count: {battery_data['cycle_count']}
+           Low Power Mode: {battery_data['low_power_mode']}
+        Remaining Battery: {battery_data['time_remaining']}\n
+    """)
 
 
 # returns the data from data.csv and adds a new row
@@ -130,26 +131,19 @@ def insert_row():
     return data_frame
 
 
-
-
-
 # main
 # -------------------------------------------------
 system_info = get_system_info()
 battery_data = get_battery_info()
-
-#debug
-for i, v in enumerate(battery_data.items()):
-    print(i, v)
-print("\n")
-
-
 df = insert_row() # access the dataframe
 
+print_system_info()
+print_battery_info()
 
 # selecting device (M series chip) if available
 if torch.backends.mps.is_available(): device = 'mps'
 else: device = 'cpu'
+
 
 
 feature_columns = [
@@ -162,10 +156,12 @@ feature_columns = [
 ]
 target_column = ["Time_Remaining"]
 
+# drop each row that is missing data from the 
+# feature columns
 df = df.dropna(subset=feature_columns + target_column)
 
 
-# y = traning_data; x = target_data
+# traning_data = x; target_data = y
 training_data = torch.tensor(
     df[feature_columns].values,
     dtype=torch.float32
@@ -176,88 +172,81 @@ target_data = torch.tensor(
     dtype=torch.float32
 ).to(device)
 
-print(f"training data: {training_data.shape}")
-print(f"target data: {target_data.shape}")
 
-
-
-
+# for a given x (training_data), 
+# the model tries to predict y (target_data)
+# --------------------------------------------------
 split = int(len(df) * 0.8)
 
 # first 80% of the data for training
 x_train = training_data[:split]
 y_train = target_data[:split]
 
-# last 20% of the data for validation
+# last 20% of the data for validation 
 x_val = training_data[split:]
 y_val = target_data[split:]
 
-# training and validation indices
+# training and validation indices 
 training_idx = np.arange(0, split)
 validation_idx = np.arange(split, len(df))
 
 
-
-#debug print
+# --- debug print ---
 print(f"""
-    x training: {x_train.shape}
-    y training: {y_train.shape}
-
-    x validation: {x_val.shape}
-    y validation: {y_val.shape}
-
     training indices: {training_idx.shape}
     validation indices: {validation_idx.shape}
 """)
 
 
 
-# create a sequential model
+# --- create a sequential model ---
 torch.manual_seed(0)
 model = nn.Sequential(
-    nn.Linear(6, 64), # 2 refers to input size
+    nn.Linear(6, 64), # 6 refers to input size
     nn.ReLU(),
     nn.Linear(64, 32),
     nn.ReLU(),
     nn.Linear(32, 16),
     nn.ReLU(),
-    nn.Linear(16, 1)
+    nn.Linear(16, 1),
 ).to(device)
 
-# create an optimizer
+# --- create an optimizer ---
 lr = 0.001
 optimizer = optim.Adam(
     model.parameters(),
     lr=lr
 )
 
-
-
-# run the model
+# --- running the model ---
 loss_fc = nn.L1Loss()
-for epoch in range(1000):
+for epoch in range(1000): 
     model.train()
     optimizer.zero_grad()
 
     predicted_y = model(x_train)
     loss = loss_fc(predicted_y, y_train)
-    loss.backward()
 
+    loss.backward()
     optimizer.step()
 
-    if epoch % 100 == 0: print(f"Epoch {epoch}: {loss.item():.4f}")
+    if epoch % 100 == 0: 
+        print(f"Epoch {epoch}: {loss.item():.4f}")
 
 
 
+
+# --- evaluate model results on validation data ---
 model.eval()
 with torch.no_grad():
     val_prediction = model(x_val)
     val_loss = loss_fc(val_prediction, y_val)
 
 
+# --- printing model results ---
+print('\n')
 for prediction, real_answer in zip(val_prediction, y_val):
     print(f"Predicted: {prediction.item():.2f} | Actual: {real_answer.item():.2f}")
 
-print(f"""
-      Validation Loss: {val_loss.item():.4f}
-    """)
+
+print(f"Validation Loss: {val_loss.item():.4f}")
