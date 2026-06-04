@@ -3,6 +3,7 @@ import psutil
 import datetime
 import subprocess
 import sys
+import time
 
 import numpy as np
 import pandas as pd
@@ -10,6 +11,9 @@ import pandas as pd
 import torch
 import torch.optim as optim
 import torch.nn as nn
+
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 
 # a dictionary containing general system info
 # ----------------------------------------------------
@@ -131,122 +135,146 @@ def insert_row():
     return data_frame
 
 
-# main
-# -------------------------------------------------
-system_info = get_system_info()
-battery_data = get_battery_info()
-df = insert_row() # access the dataframe
 
-print_system_info()
-print_battery_info()
+while (True):
+    # main
+    # -------------------------------------------------
+    system_info = get_system_info()
+    battery_data = get_battery_info()
+    df = insert_row() # access the dataframe
 
-# selecting device (M series chip) if available
-if torch.backends.mps.is_available(): device = 'mps'
-else: device = 'cpu'
+    print_system_info()
+    print_battery_info()
 
 
+    # selecting device (M series chip) if available
+    # if torch.backends.mps.is_available(): device = 'mps'
+    # else: device = 'cpu'
 
-feature_columns = [
-    "Battery_Percent",
-    "Maximum_Capacity",
-    "Process_Count",
-    "CPU_Usage",
-    "Total_Memory",
-    "Used_Memory"
-]
-target_column = ["Time_Remaining"]
+    device = 'cpu'
+    
+    feature_columns = [
+        "Battery_Percent",
+        "Maximum_Capacity",
+        "Process_Count",
+        "CPU_Usage",
+        "Total_Memory",
+        "Used_Memory"
+    ]
+    target_column = ["Time_Remaining"]
 
-# drop each row that is missing data from the 
-# feature columns
-df = df.dropna(subset=feature_columns + target_column)
+    # drop each row that is missing data from the 
+    # feature columns
+    df = df.dropna(subset=feature_columns + target_column)
 
+    # initialize scalers
+    x_scaler = StandardScaler()
+    y_scaler = StandardScaler()
 
-# traning_data = x; target_data = y
-training_data = torch.tensor(
-    df[feature_columns].values,
-    dtype=torch.float32
-).to(device)
-
-target_data = torch.tensor(
-    df[target_column].values,
-    dtype=torch.float32
-).to(device)
-
-
-# for a given x (training_data), 
-# the model tries to predict y (target_data)
-# --------------------------------------------------
-split = int(len(df) * 0.8)
-
-# first 80% of the data for training
-x_train = training_data[:split]
-y_train = target_data[:split]
-
-# last 20% of the data for validation 
-x_val = training_data[split:]
-y_val = target_data[split:]
-
-# training and validation indices 
-training_idx = np.arange(0, split)
-validation_idx = np.arange(split, len(df))
+    x_scaled = x_scaler.fit_transform(df[feature_columns].values)
+    y_scaled = y_scaler.fit_transform(df[target_column].values)
 
 
-# --- debug print ---
-print(f"""
-    training indices: {training_idx.shape}
-    validation indices: {validation_idx.shape}
-""")
+    # traning_data = x; target_data = y
+    training_data = torch.tensor(
+        x_scaled,
+        dtype=torch.float32
+    ).to(device)
+
+    target_data = torch.tensor(
+        y_scaled,
+        dtype=torch.float32
+    ).to(device)
+
+
+    # for a given x (training_data), 
+    # the model tries to predict y (target_data)
+    # --------------------------------------------------
+    all_idx = np.arange(len(df))
+
+    np.random.shuffle(all_idx)
+
+
+    split = int(len(df) * 0.8)
+    # # training and validation indices 
+    training_idx = all_idx[0:split]
+    validation_idx = all_idx[split:len(df)]
+
+    # first 80% of the data for training
+    x_train = training_data[training_idx]
+    y_train = target_data[training_idx]
+
+    # last 20% of the data for validation 
+    x_val = training_data[validation_idx]
+    y_val = target_data[validation_idx]
 
 
 
-# --- create a sequential model ---
-torch.manual_seed(0)
-model = nn.Sequential(
-    nn.Linear(6, 64), # 6 refers to input size
-    nn.ReLU(),
-    nn.Linear(64, 32),
-    nn.ReLU(),
-    nn.Linear(32, 16),
-    nn.ReLU(),
-    nn.Linear(16, 1),
-).to(device)
-
-# --- create an optimizer ---
-lr = 0.001
-optimizer = optim.Adam(
-    model.parameters(),
-    lr=lr
-)
-
-# --- running the model ---
-loss_fc = nn.L1Loss()
-for epoch in range(1000): 
-    model.train()
-    optimizer.zero_grad()
-
-    predicted_y = model(x_train)
-    loss = loss_fc(predicted_y, y_train)
-
-    loss.backward()
-    optimizer.step()
-
-    if epoch % 100 == 0: 
-        print(f"Epoch {epoch}: {loss.item():.4f}")
+    # --- debug print ---
+    print(f"""
+        training indices: {training_idx.shape}
+        validation indices: {validation_idx.shape}
+    """)
 
 
 
 
-# --- evaluate model results on validation data ---
-model.eval()
-with torch.no_grad():
-    val_prediction = model(x_val)
-    val_loss = loss_fc(val_prediction, y_val)
+
+    # --- create a sequential model ---
+    torch.manual_seed(0)
+    model = nn.Sequential(
+        nn.Linear(6, 128), # 6 refers to input size
+        nn.ReLU(),
+        nn.Linear(128, 64),
+        nn.ReLU(),
+        nn.Linear(64, 32),
+        nn.ReLU(),
+        nn.Linear(32, 1),
+    ).to(device)
+
+    # --- create an optimizer ---
+    lr = 0.001
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=lr
+    )
+
+    # --- running the model ---
+    loss_fc = nn.L1Loss()
+    for epoch in range(2000): 
+        model.train()
+        optimizer.zero_grad()
+
+        predicted_y = model(x_train)
+        loss = loss_fc(predicted_y, y_train)
+
+        loss.backward()
+        optimizer.step()
+
+        if epoch % 200 == 0: 
+            print(f"Epoch {epoch}: {loss.item():.4f}")
 
 
-# --- printing model results ---
-print('\n')
-for prediction, real_answer in zip(val_prediction, y_val):
-    print(f"Predicted: {prediction.item():.2f} | Actual: {real_answer.item():.2f}")
 
 
-print(f"Validation Loss: {val_loss.item():.4f}")
+    # --- evaluate model results on validation data ---
+    model.eval()
+    with torch.no_grad():
+        x_prediction = model(x_val)
+        val_loss = loss_fc(x_prediction, y_val)
+
+
+    unscaled_x = x_scaler.inverse_transform(x_val)
+    unscaled_y = y_scaler.inverse_transform(y_val)
+
+    # --- printing model results ---
+    print('\n')
+    for guess, actual in zip(x_prediction, y_val):
+        print(f"Predicted: {guess.item():.2f} | Actual: {actual.item():.2f}")
+
+
+
+
+
+    print(f"Validation Loss: {val_loss.item():.4f}%")
+    time.sleep(15)
