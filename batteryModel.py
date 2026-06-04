@@ -136,7 +136,65 @@ def insert_row():
 
 
 
-while (True):
+
+class BatteryModel:
+    # --- initialize a sequential model & optimizer ---
+    def __init__(self):
+        torch.manual_seed(0)
+        self.loss_fc = nn.L1Loss()
+
+        self.model = nn.Sequential(
+            nn.Linear(6, 128), # 6 refers to input size
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1),
+        ).to(device)
+
+        # -------- create an optimizer --------
+        self.optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=0.001
+        )
+        
+    # -------- running the model --------
+    def run_model(self, x_train, y_train):
+        for epoch in range(1000): 
+            self.model.train()
+            self.optimizer.zero_grad()
+
+            predicted_y = self.model(x_train)
+            loss = self.loss_fc(predicted_y, y_train)
+
+            loss.backward()
+            self.optimizer.step()
+
+            if epoch % 200 == 0: 
+                print(f"Epoch {epoch}: {loss.item():.4f}")
+
+    def evaluate_model(self, x_val, y_val):
+        # --- evaluate model results on validation data ---
+        self.model.eval()
+        with torch.no_grad():
+            # calculate validation loss
+            x_prediction = self.model(x_val)
+            val_loss = self.loss_fc(x_prediction, y_val)
+
+            # get actual values from the scaled values
+            scaled_predictions = torch.as_tensor(x_val).float().to(device)
+            predictions = self.model(scaled_predictions).detach().cpu().numpy()
+
+            actual_y = y_scaler.inverse_transform(y_val)
+            predicted_y = y_scaler.inverse_transform(predictions)
+
+        return actual_y, predicted_y, val_loss
+
+
+
+# while loop is mostly for debugging and collecting data
+while (True): 
     # main
     # -------------------------------------------------
     system_info = get_system_info()
@@ -191,9 +249,7 @@ while (True):
     # the model tries to predict y (target_data)
     # --------------------------------------------------
     all_idx = np.arange(len(df))
-
     np.random.shuffle(all_idx)
-
 
     split = int(len(df) * 0.8)
     # # training and validation indices 
@@ -208,8 +264,6 @@ while (True):
     x_val = training_data[validation_idx]
     y_val = target_data[validation_idx]
 
-
-
     # --- debug print ---
     print(f"""
         training indices: {training_idx.shape}
@@ -217,59 +271,15 @@ while (True):
     """)
 
 
-
-
-
-    # --- create a sequential model ---
-    torch.manual_seed(0)
-    model = nn.Sequential(
-        nn.Linear(6, 128), # 6 refers to input size
-        nn.ReLU(),
-        nn.Linear(128, 64),
-        nn.ReLU(),
-        nn.Linear(64, 32),
-        nn.ReLU(),
-        nn.Linear(32, 1),
-    ).to(device)
-
-    # --- create an optimizer ---
-    lr = 0.001
-    optimizer = optim.Adam(
-        model.parameters(),
-        lr=lr
-    )
+    # --- initialize the model ---
+    b_model = BatteryModel()
 
     # --- running the model ---
-    loss_fc = nn.L1Loss()
-    for epoch in range(2000): 
-        model.train()
-        optimizer.zero_grad()
-
-        predicted_y = model(x_train)
-        loss = loss_fc(predicted_y, y_train)
-
-        loss.backward()
-        optimizer.step()
-
-        if epoch % 200 == 0: 
-            print(f"Epoch {epoch}: {loss.item():.4f}")
-
-
-
+    b_model.run_model(x_train, y_train)
 
     # --- evaluate model results on validation data ---
-    model.eval()
-    with torch.no_grad():
-        # calculate validation loss
-        x_prediction = model(x_val)
-        val_loss = loss_fc(x_prediction, y_val)
+    actual_y, predicted_y, val_loss = b_model.evaluate_model(x_val, y_val)
 
-        # get actual values from the scaled values
-        scaled_predictions = torch.as_tensor(x_val).float().to(device)
-        predictions = model(scaled_predictions).detach().cpu().numpy()
-
-        actual_y = y_scaler.inverse_transform(y_val)
-        predicted_y = y_scaler.inverse_transform(predictions)
 
 
     # --- printing model results ---
@@ -278,4 +288,4 @@ while (True):
         print(f"Predicted: {int(guess.item())} | Actual: {int(actual.item())}")
 
     print(f"Validation Loss: {val_loss.item():.4f}%")
-    time.sleep(15)
+    time.sleep(30)
