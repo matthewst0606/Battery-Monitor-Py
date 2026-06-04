@@ -34,8 +34,8 @@ def get_system_info():
 
     for i, v in enumerate(system_info.items()):
         print(i, v)
-    print("\n")
 
+    print("\n")
     return system_info
 
 def get_battery_info():
@@ -44,19 +44,18 @@ def get_battery_info():
     battery_info = subprocess.getoutput("pmset -g batt")
     batteryInfo_list = battery_info.split()
 
-    battery_percent = batteryInfo_list[7].removesuffix(";")
-    time_remaining = batteryInfo_list[9]
+    battery_percent = batteryInfo_list[7].replace("%;", "")
+    time_remaining = batteryInfo_list[9].replace(":", "")
 
-    print(f"Percent Charge: {battery_percent} \n")
+    print(f"Percent Charge: {battery_percent}%")
 
     if time_remaining == "(no":
-        print(f"Remaining Battery: Calculating\n")
+        print(f"Remaining Battery: Calculating")
         while time_remaining == "(no":
-            if time_remaining !="(no)":
-                break
+            if time_remaining !="(no)": break
     
     print(f"Remaining Battery: {time_remaining}\n")
-    return battery_percent, time_remaining
+    return int(battery_percent), int(time_remaining)
 
 
 def get_battery_health():
@@ -64,12 +63,41 @@ def get_battery_health():
     batteryHealth_list = battery_health.split()
 
     battery_condition = batteryHealth_list[1]
-    maximum_capacity = batteryHealth_list[4]
+    maximum_capacity = batteryHealth_list[4].replace("%", "")
+
 
     print(f"Battery Condition: {battery_condition}")
-    print(f"Maximum Capacity: {maximum_capacity}")
+    print(f"Maximum Capacity: {maximum_capacity}%\n")
 
-    return battery_condition, maximum_capacity
+    return battery_condition, int(maximum_capacity)
+
+def insert_row():
+    data_frame = pd.read_csv("data.csv")
+
+    # create a new row when new data is collected
+    new_row = {
+        "Date": system_info['Sys_Date'],
+        "Time": system_info['Sys_Time'],
+        "Battery_Percent": battery_percent,
+        "Time_Remaining": time_remaining,
+        "Battery_Condition": battery_condition,
+        "Maximum_Capacity": maximum_capacity
+    }
+
+    # adds the new row to the data.csv file
+    data_frame = pd.concat([data_frame, pd.DataFrame([new_row])], ignore_index=True)
+    data_frame.to_csv("data.csv", index=False)
+
+    print(data_frame)
+    return data_frame
+
+
+
+
+
+
+
+
 
 
 system_info = get_system_info()
@@ -79,32 +107,53 @@ battery_condition, maximum_capacity = get_battery_health()
 
 
 np.random.seed(0)
+df = insert_row()
 
-data_frame = pd.read_csv("data.csv")
+# selecting device (M series chip) if available
+if torch.backends.mps.is_available(): device = 'mps'
+else: device = 'cpu'
 
-# create a new row when new data is collected
-new_row = {
-    "Date": system_info['Sys_Date'],
-    "Time": system_info['Sys_Time'],
-    "Battery_Percent": battery_percent,
-    "Time_Remaining": time_remaining,
-    "Battery_Condition": battery_condition,
-    "Maximum_Capacity": maximum_capacity
-}
-data_frame = pd.concat([data_frame, pd.DataFrame([new_row])], ignore_index=True)
-data_frame.to_csv("data.csv", index=False)
-print(data_frame)
+# y = traning_data; x = target_data
+training_data = torch.tensor(
+    df[["Battery_Percent", "Maximum_Capacity"]].values,
+    dtype=torch.float32
+).to(device)
+print(f"training data: {training_data.shape}")
 
-training_data = [data_frame]
-target_data = [[time_remaining]]
+target_data = torch.tensor(
+    df[["Time_Remaining"]].values,
+    dtype=torch.float32
+).to(device)
 
-
-N = len(data_frame)
-split_training_data = data_frame[:int(N * 0.8)]
-split_target_data = data_frame[:int(N * 0.8)]
+print(f"target data: {target_data.shape}")
 
 
 
+split = int(len(df) * 0.8)
+
+# first 80% of the data for training
+x_train = df[:split]
+y_train = df[:split]
+
+# last 20% of the data for validation
+x_val = df[split:]
+y_val = df[split:]
+
+# training and validation indices
+training_idx = np.arange(0, split)
+validation_idx = np.arange(split, len(df))
+
+#debug print
+print(f"""
+x training: {x_train.shape}
+y training: {y_train.shape}
+
+x validation: {x_val.shape}
+y validation: {y_val.shape}
+
+training indices: {training_idx.shape}
+validation indices: {validation_idx.shape}
+""")
 
 
 
