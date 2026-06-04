@@ -106,7 +106,6 @@ battery_condition, maximum_capacity = get_battery_health()
 
 
 
-np.random.seed(0)
 df = insert_row()
 
 # selecting device (M series chip) if available
@@ -132,12 +131,12 @@ print(f"target data: {target_data.shape}")
 split = int(len(df) * 0.8)
 
 # first 80% of the data for training
-x_train = df[:split]
-y_train = df[:split]
+x_train = training_data[:split]
+y_train = target_data[:split]
 
 # last 20% of the data for validation
-x_val = df[split:]
-y_val = df[split:]
+x_val = training_data[split:]
+y_val = target_data[split:]
 
 # training and validation indices
 training_idx = np.arange(0, split)
@@ -156,8 +155,38 @@ validation indices: {validation_idx.shape}
 """)
 
 
+# create a sequential model
+torch.manual_seed(0)
+model = nn.Sequential(
+    nn.Linear(2, 32), # 2 refers to input size
+    nn.ReLU(),
+    nn.Linear(32, 16),
+    nn.ReLU(),
+    nn.Linear(16, 1)
+).to(device)
 
 
+# create an optimizer
+lr = 0.001
+optimizer = optim.Adam(
+    model.parameters(),
+    lr=lr
+)
+
+
+# run the model
+loss_fc = nn.L1Loss()
+for epoch in range(1000):
+    model.train()
+    optimizer.zero_grad()
+
+    predicted_y = model(x_train)
+    loss = loss_fc(predicted_y, y_train)
+    loss.backward()
+
+    optimizer.step()
+
+    if epoch % 100 == 0: print(f"Epoch {epoch}: {loss.item():.4f}")
 
 
 
