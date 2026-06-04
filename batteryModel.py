@@ -260,21 +260,22 @@ while (True):
     # --- evaluate model results on validation data ---
     model.eval()
     with torch.no_grad():
+        # calculate validation loss
         x_prediction = model(x_val)
         val_loss = loss_fc(x_prediction, y_val)
 
+        # get actual values from the scaled values
+        scaled_predictions = torch.as_tensor(x_val).float().to(device)
+        predictions = model(scaled_predictions).detach().cpu().numpy()
 
-    unscaled_x = x_scaler.inverse_transform(x_val)
-    unscaled_y = y_scaler.inverse_transform(y_val)
+        actual_y = y_scaler.inverse_transform(y_val)
+        predicted_y = y_scaler.inverse_transform(predictions)
+
 
     # --- printing model results ---
     print('\n')
-    for guess, actual in zip(x_prediction, y_val):
-        print(f"Predicted: {guess.item():.2f} | Actual: {actual.item():.2f}")
-
-
-
-
+    for guess, actual in zip(predicted_y[:10], actual_y[:10]):
+        print(f"Predicted: {int(guess.item())} | Actual: {int(actual.item())}")
 
     print(f"Validation Loss: {val_loss.item():.4f}%")
     time.sleep(15)
