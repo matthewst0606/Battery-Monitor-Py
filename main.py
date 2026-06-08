@@ -6,6 +6,9 @@ from sklearn.preprocessing import StandardScaler
 from battery_data import GetBatteryData
 from encoder import encode
 from csv_logger import insert_row
+from csv_logger import process_row
+from csv_logger import powermetrics_row
+
 from battery_model import BatteryModel
 
 
@@ -13,6 +16,26 @@ from battery_model import BatteryModel
 #-------------------------------
 # top -o cpu
 # sudo powermetrics --samplers tasks --show-process-energy -n 1
+
+# sudo powermetrics --samplers cpu_power,gpu_power -n 1
+# sudo powermetrics --samplers thermal -n 1
+
+# sudo powermetrics --samplers cpu_power,gpu_power,thermal,battery,tasks --show-process-energy -n 1
+
+
+# more potential predictions
+#-------------------------------
+# 1. Battery drain rate
+
+
+# more potential features 
+#-------------------------------
+# 1. better automatic brightness adjustment based on current system data/usage.
+# e.g. say like a user wants to get n hours out of their battery, the model can adjust
+# brightness levels and other system factors to try and adjust to that request
+
+
+
 
 
 # while loop is mostly for debugging and collecting data
@@ -22,18 +45,24 @@ while (True):
         data = GetBatteryData()
         system_info = data.system_info
         battery_info = data.battery_dict
+        process_info = data.process_dict
+        
+        powermetrics_info = data.powermetrics_dict
 
         encoded_battery_info = encode(battery_info)
-        
+
         # access the dataframe
+        process_df = process_row(process_info)
+        powermetrics_df = powermetrics_row(powermetrics_info)
+
         df = insert_row(
             system_info, 
+            process_info, 
             battery_info, 
             encoded_battery_info
         )
 
-        data.print_system_info()
-        data.print_battery_info()
+
     except ValueError as error:
         print(error)
 
@@ -50,9 +79,13 @@ while (True):
         "Used_Memory",
         "Cycle_Count",
         "Charging",
-        "Low_Power_Mode"
+        "Low_Power_Mode",
+        "Process_Power",
+        "Process_State"
     ]
     target_column = ["Time_Remaining"]
+
+
 
     # drop each row that is missing data from the 
     # feature columns
@@ -112,4 +145,4 @@ while (True):
         print(f"Predicted: {int(guess.item())} | Actual: {int(actual.item())}")
 
     print(f"Validation Loss: {val_loss.item():.4f}%")
-    time.sleep(30)
+    time.sleep(15)

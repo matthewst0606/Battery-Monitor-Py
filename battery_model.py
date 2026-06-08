@@ -11,7 +11,7 @@ class BatteryModel:
         self.loss_fc = nn.L1Loss()
 
         self.model = nn.Sequential(
-            nn.Linear(9, 128), # 6 refers to input size
+            nn.Linear(11, 128), # 6 refers to input size
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
@@ -38,7 +38,7 @@ class BatteryModel:
             loss.backward()
             self.optimizer.step()
 
-            if epoch % 200 == 0: 
+            if epoch % 100 == 0: 
                 print(f"Epoch {epoch}: {loss.item():.4f}")
 
     # --- evaluate model results on validation data ---
